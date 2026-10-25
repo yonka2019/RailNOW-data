@@ -1,0 +1,50 @@
+name: Nightly timetable
+
+on:
+  schedule:
+    - cron: '30 2 * * *'   # 04:30 Israel winter time, 05:30 summer; MOT publishes overnight
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Publish even if the source did not change (e.g. after editing site/)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: timetable
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test extractor
+        run: python3 -I tools/test_extract_rail.py && python3 -I tools/test_nightly.py
+
+      - name: Build timetable
+        id: build
+        env:
+          FORCE: ${{ inputs.force }}
+        run: python3 -I tools/nightly.py out
+
+      - name: Add site pages
+        if: steps.build.outputs.publish == 'true'
+        run: cp site/* out/ && touch out/.nojekyll
+
+      # One fresh commit each night (force push), so gh-pages never grows a history.
+      - name: Publish to gh-pages
+        if: steps.build.outputs.publish == 'true'
+        working-directory: out
+        run: |
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "timetable $(date -u +%F)"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages
