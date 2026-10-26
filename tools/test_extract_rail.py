@@ -16,7 +16,7 @@ def write_zip(path, files):
 
 
 def make_zip(path):
-    """The 10-days feed's shape: one service per date in calendar_dates.txt, real dwell times."""
+    """The 10-days feed's shape: one service per date in calendar_dates.txt, padded departure times."""
     write_zip(path, {
         'agency.txt': 'agency_id,agency_name\n2,רכבת ישראל\n3,אגד\n',
         'routes.txt': 'route_id,agency_id,route_short_name,route_long_name\nR1,2,,נהריה - מודיעין\nB1,3,1,אוטובוס\n',
@@ -50,6 +50,29 @@ def main_feed_zip():
     return buf
 
 
+def savidor_zip(arrival, departure):
+    """Motzkin -> Savidor -> airport; Savidor in the middle, where riders board."""
+    buf = io.BytesIO()
+    write_zip(buf, {
+        'routes.txt': 'route_id,agency_id,route_short_name,route_long_name\nR1,2,,נהריה - מודיעין\n',
+        'calendar_dates.txt': 'service_id,date,exception_type\nS1,20261022,1\n',
+        'trips.txt': 'route_id,service_id,trip_id,trip_headsign\nR1,S1,T1,174\n',
+        'stops.txt': ('stop_id,stop_code,stop_name,stop_desc,stop_lat,stop_lon\n'
+                      '1,17117,קרית מוצקין,,32.83,35.07\n2,17038,תל אביב מרכז,,32.08,34.79\n'
+                      '3,17090,נתב"ג,,32.0,34.87\n'),
+        'stop_times.txt': ('trip_id,arrival_time,departure_time,stop_id,stop_sequence,pickup_type,drop_off_type\n'
+                           'T1,17:28:00,17:30:00,1,1,0,1\n'
+                           f'T1,{arrival},{departure},2,2,0,0\n'
+                           'T1,19:15:00,19:15:00,3,3,1,0\n'),
+    })
+    buf.seek(0)
+    return buf
+
+
+def savidor_stop(out):
+    return out['trips'][0]['stops'][1][1:3]
+
+
 class ExtractTest(unittest.TestCase):
     def test_extract_builds_rail_only(self):
         buf = io.BytesIO()
@@ -60,7 +83,7 @@ class ExtractTest(unittest.TestCase):
         trip = out['trips'][0]
         self.assertEqual(trip['train'], '131')
         self.assertEqual(trip['date'], '2026-10-22')
-        self.assertEqual(trip['stops'][1][1:3], [86700, 86760])
+        self.assertEqual(trip['stops'][1][1:3], [86700, 86700])
         self.assertEqual(trip['stops'][2][1], 90600)
         self.assertEqual(trip['stops'][0][3], 2)
         self.assertEqual(trip['stops'][2][3], 1)
@@ -69,7 +92,6 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(len(out['stations']), 3)
         names = [s['name'] for s in out['stations']]
         self.assertEqual(names[trip['stops'][1][0]], 'קרית מוצקין')
-        self.assertTrue(out['waits'])
 
     def test_station_id_is_stop_code(self):
         # stop_id differs between the two MOT feeds; stop_code (17117 = Motzkin) is the same in both.
@@ -80,7 +102,26 @@ class ExtractTest(unittest.TestCase):
         out = extract(main_feed_zip(), start=date(2026, 10, 22), days=14)
         self.assertEqual([t['date'] for t in out['trips']], ['2026-10-22', '2026-10-29'])
         self.assertEqual((out['firstDate'], out['lastDate']), ('2026-10-22', '2026-10-29'))
-        self.assertFalse(out['waits'])
+
+
+    def test_padding_dropped_outside_savidor(self):
+        # The published time is arrival_time; MOT pads departure_time by 1-2 min at every station but Savidor.
+        stops = extract(savidor_zip('18:55:00', '18:57:00'))['trips'][0]['stops']
+        self.assertEqual(stops[0][1:3], [62880, 62880])
+
+    def test_savidor_keeps_real_wait(self):
+        self.assertEqual(savidor_stop(extract(savidor_zip('18:55:00', '18:58:00'))), [68100, 68280])
+
+    def test_savidor_gets_two_minutes_when_feed_has_none(self):
+        # The main feed has arrival == departure everywhere; Savidor's real wait is 2 min.
+        self.assertEqual(savidor_stop(extract(savidor_zip('18:55:00', '18:55:00'))), [68100, 68220])
+
+    def test_savidor_as_last_stop_gets_no_wait(self):
+        buf = io.BytesIO()
+        make_zip(buf)
+        buf.seek(0)
+        last = extract(buf)['trips'][0]['stops'][2]
+        self.assertEqual(last[1:3], [90600, 90600])
 
 
 if __name__ == '__main__':

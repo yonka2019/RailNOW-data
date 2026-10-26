@@ -6,6 +6,9 @@ Reads both MOT feeds:
 
 Stations are keyed by stop_code, which is the same in both feeds (stop_id is not).
 
+arrival_time is the time Israel Railways publishes, and the train leaves then. The 10-days
+feed pads departure_time by 1-2 min everywhere; only Savidor has a real wait (≈2 min).
+
 Usage: python -I tools/extract_rail.py <zip> <out.json> [YYYY-MM-DD start] [days]
 """
 import csv
@@ -16,6 +19,8 @@ import zipfile
 from datetime import date, datetime, timedelta
 
 RAIL_AGENCY = '2'
+SAVIDOR = '17038'
+SAVIDOR_WAIT = 120
 WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 
 
@@ -75,16 +80,17 @@ def extract(zip_file, start=None, days=14):
     stations = [s for s in _rows(z, 'stops.txt') if s['stop_id'] in used]
     stations.sort(key=lambda s: s['stop_name'])
     index = {s['stop_id']: i for i, s in enumerate(stations)}
+    savidor = {s['stop_id'] for s in stations if s['stop_code'] == SAVIDOR}
 
     out_trips = []
-    waits = False
     for tid, rows in times.items():
         rows.sort(key=lambda r: int(r['stop_sequence']))
         stops = []
         for r in rows:
             flags = (1 if r.get('pickup_type') == '1' else 0) | (2 if r.get('drop_off_type') == '1' else 0)
-            arr, dep = _sec(r['arrival_time']), _sec(r['departure_time'])
-            waits = waits or arr != dep
+            arr = dep = _sec(r['arrival_time'])
+            if r['stop_id'] in savidor and not flags & 1:
+                dep = max(_sec(r['departure_time']), arr + SAVIDOR_WAIT)
             stops.append([index[r['stop_id']], arr, dep, flags])
         t = trips[tid]
         for d in dates[t['service_id']]:
@@ -95,7 +101,6 @@ def extract(zip_file, start=None, days=14):
     return {
         'firstDate': used_dates[0],
         'lastDate': used_dates[-1],
-        'waits': waits,
         'stations': [{'id': s['stop_code'], 'name': s['stop_name'],
                       'lat': float(s['stop_lat']), 'lon': float(s['stop_lon'])} for s in stations],
         'trips': out_trips,
@@ -109,4 +114,4 @@ if __name__ == '__main__':
     with open(sys.argv[2], 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
     print(f"{len(data['stations'])} stations, {len(data['trips'])} trips, "
-          f"{data['firstDate']}..{data['lastDate']}, waits={data['waits']}")
+          f"{data['firstDate']}..{data['lastDate']}")
