@@ -30,6 +30,8 @@ def make_zip(path):
                            'T1,25:10:00,25:10:00,12,3,1,0\n'
                            'T1,24:05:00,24:06:00,11,2,0,0\n'
                            'X1,10:00:00,10:00:00,99,1,0,0\n'),
+        'translations.txt': ('trans_id,lang,translation\n'
+                             'נהריה,EN,Nahariyya\nנהריה,AR,نهاريا\nתחנת אוטובוס,EN,Bus stop\n'),
     })
 
 
@@ -92,6 +94,18 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(len(out['stations']), 3)
         names = [s['name'] for s in out['stations']]
         self.assertEqual(names[trip['stops'][1][0]], 'קרית מוצקין')
+
+    def test_english_names_from_translations(self):
+        buf = io.BytesIO()
+        make_zip(buf)
+        buf.seek(0)
+        en = {s['name']: s['en'] for s in extract(buf)['stations']}
+        self.assertEqual(en['נהריה'], 'Nahariyya')
+        self.assertEqual(en['קרית מוצקין'], '')
+
+    def test_no_translations_file_means_no_english(self):
+        out = extract(main_feed_zip(), start=date(2026, 10, 22))
+        self.assertTrue(all(s['en'] == '' for s in out['stations']))
 
     def test_station_id_is_stop_code(self):
         # stop_id differs between the two MOT feeds; stop_code (17117 = Motzkin) is the same in both.

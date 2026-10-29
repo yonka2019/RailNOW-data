@@ -81,6 +81,9 @@ def extract(zip_file, start=None, days=14):
     stations.sort(key=lambda s: s['stop_name'])
     index = {s['stop_id']: i for i, s in enumerate(stations)}
     savidor = {s['stop_id'] for s in stations if s['stop_code'] == SAVIDOR}
+    names = {s['stop_name'] for s in stations}
+    en = {r['trans_id']: r['translation'] for r in _rows(z, 'translations.txt')
+          if r['lang'] == 'EN' and r['trans_id'] in names} if 'translations.txt' in z.namelist() else {}
 
     out_trips = []
     for tid, rows in times.items():
@@ -101,7 +104,7 @@ def extract(zip_file, start=None, days=14):
     return {
         'firstDate': used_dates[0],
         'lastDate': used_dates[-1],
-        'stations': [{'id': s['stop_code'], 'name': s['stop_name'],
+        'stations': [{'id': s['stop_code'], 'name': s['stop_name'], 'en': en.get(s['stop_name'], ''),
                       'lat': float(s['stop_lat']), 'lon': float(s['stop_lon'])} for s in stations],
         'trips': out_trips,
     }
